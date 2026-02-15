@@ -116,7 +116,12 @@ def load_all_resources():
         with open(features_path, 'r') as f:
             features = [line.strip() for line in f.readlines()]
     else:
-        features = None
+        # Default feature names if file doesn't exist
+        features = [
+            'fixed_acidity', 'volatile_acidity', 'citric_acid', 'residual_sugar',
+            'chlorides', 'free_sulfur_dioxide', 'total_sulfur_dioxide', 
+            'density', 'pH', 'sulphates', 'alcohol'
+        ]
     
     return models, scaler, results, features
 
@@ -449,10 +454,20 @@ elif app_mode == "🔮 Make Predictions":
             
             # Feature values summary
             with st.expander("📋 View Input Feature Summary"):
-                input_df = pd.DataFrame({
-                    'Feature': feature_names,
-                    'Value': input_data[0]
-                })
+                if feature_names and len(feature_names) == 11:
+                    input_df = pd.DataFrame({
+                        'Feature': feature_names,
+                        'Value': input_data[0]
+                    })
+                else:
+                    input_df = pd.DataFrame({
+                        'Feature': [
+                            'fixed_acidity', 'volatile_acidity', 'citric_acid', 'residual_sugar',
+                            'chlorides', 'free_sulfur_dioxide', 'total_sulfur_dioxide', 
+                            'density', 'pH', 'sulphates', 'alcohol'
+                        ],
+                        'Value': input_data[0]
+                    })
                 st.dataframe(input_df, use_container_width=True)
     
     # ============================================================
@@ -461,7 +476,12 @@ elif app_mode == "🔮 Make Predictions":
     else:
         st.markdown("---")
         st.subheader("3️⃣ Upload Wine Dataset")
-        st.info("📋 **Required columns:** " + ", ".join(feature_names))
+        
+        # Safe feature names display
+        if feature_names and len(feature_names) > 0:
+            st.info("📋 **Required columns:** " + ", ".join(feature_names))
+        else:
+            st.info("📋 **Required:** 11 physicochemical wine features")
         
         uploaded_file = st.file_uploader(
             "Choose CSV file", 
@@ -492,16 +512,26 @@ elif app_mode == "🔮 Make Predictions":
                 if st.button("🚀 Run Predictions", type="primary", use_container_width=True):
                     with st.spinner("Processing predictions..."):
                         
+                        # Get default feature names if not loaded
+                        if not feature_names or len(feature_names) != 11:
+                            expected_features = [
+                                'fixed_acidity', 'volatile_acidity', 'citric_acid', 'residual_sugar',
+                                'chlorides', 'free_sulfur_dioxide', 'total_sulfur_dioxide', 
+                                'density', 'pH', 'sulphates', 'alcohol'
+                            ]
+                        else:
+                            expected_features = feature_names
+                        
                         # Prepare data
                         if has_labels:
                             if 'quality_binary' in test_data.columns:
                                 y_true = test_data['quality_binary']
-                                X_test = test_data[feature_names]
+                                X_test = test_data[expected_features]
                             else:
                                 y_true = (test_data['quality'] >= 6).astype(int)
-                                X_test = test_data[feature_names]
+                                X_test = test_data[expected_features]
                         else:
-                            X_test = test_data[feature_names]
+                            X_test = test_data[expected_features]
                         
                         # Scale features
                         X_test_scaled = data_scaler.transform(X_test)
