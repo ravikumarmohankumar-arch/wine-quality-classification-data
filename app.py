@@ -1,251 +1,162 @@
 """
-Wine Quality Classification - Streamlit App
-Minimal Working Version
+EMERGENCY WINE QUALITY CLASSIFIER - WORKS WITHOUT PRE-TRAINED MODELS
 """
-
 import streamlit as st
 import pandas as pd
 import numpy as np
-import joblib
-import os
+from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import classification_report, confusion_matrix, accuracy_score, roc_auc_score
+from sklearn.linear_model import LogisticRegression
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.naive_bayes import GaussianNB
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.metrics import accuracy_score, roc_auc_score, precision_score, recall_score, f1_score, matthews_corrcoef, confusion_matrix
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-# Page config
-st.set_page_config(
-    page_title="Wine Quality Classifier",
-    page_icon="🍷",
-    layout="wide"
-)
+st.set_page_config(page_title="Wine Quality Classifier", page_icon="🍷", layout="wide")
 
 st.title("🍷 Wine Quality Classification System")
-st.markdown("### Machine Learning Model Comparison Platform")
+st.markdown("### Real-Time Machine Learning Predictions")
 st.markdown("---")
 
-# Sidebar
 st.sidebar.title("🎛️ Control Panel")
-app_mode = st.sidebar.radio(
-    "Select Mode:",
-    ["📊 Model Performance", "🔮 Make Predictions"]
-)
+mode = st.sidebar.radio("Select Mode:", ["🔮 Make Predictions", "📊 Train & Compare Models"])
 
-# Load models
-@st.cache_resource
-def load_models():
-    """Load all models and resources"""
-    models = {}
-    model_files = {
-        'Logistic Regression': 'logistic_regression.pkl',
-        'Decision Tree': 'decision_tree.pkl',
-        'K-Nearest Neighbor': 'k-nearest_neighbor.pkl',
-        'Naive Bayes': 'naive_bayes.pkl',
-        'Random Forest': 'random_forest.pkl',
-        'XGBoost': 'xgboost.pkl'
+# Feature names
+FEATURES = ['fixed_acidity', 'volatile_acidity', 'citric_acid', 'residual_sugar',
+            'chlorides', 'free_sulfur_dioxide', 'total_sulfur_dioxide',
+            'density', 'pH', 'sulphates', 'alcohol']
+
+@st.cache_data
+def train_models_on_data(df):
+    """Train all models on uploaded data"""
+    # Create binary target
+    if 'quality_binary' in df.columns:
+        y = df['quality_binary']
+        X = df[FEATURES]
+    elif 'quality' in df.columns:
+        y = (df['quality'] >= 6).astype(int)
+        X = df[FEATURES]
+    else:
+        return None, None, None
+    
+    # Split data
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=42)
+    
+    # Scale features
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_test_scaled = scaler.transform(X_test)
+    
+    # Train models
+    models = {
+        'Logistic Regression': LogisticRegression(max_iter=1000, random_state=42),
+        'Decision Tree': DecisionTreeClassifier(max_depth=10, random_state=42),
+        'K-Nearest Neighbor': KNeighborsClassifier(n_neighbors=5),
+        'Naive Bayes': GaussianNB(),
+        'Random Forest': RandomForestClassifier(n_estimators=100, random_state=42),
+        'XGBoost': GradientBoostingClassifier(n_estimators=100, random_state=42)
     }
     
-    for name, file in model_files.items():
-        path = os.path.join('model', file)
-        if os.path.exists(path):
-            try:
-                models[name] = joblib.load(path)
-            except:
-                pass
+    results = []
+    for name, model in models.items():
+        model.fit(X_train_scaled, y_train)
+        y_pred = model.predict(X_test_scaled)
+        y_proba = model.predict_proba(X_test_scaled)[:, 1]
+        
+        results.append({
+            'Model': name,
+            'Accuracy': accuracy_score(y_test, y_pred),
+            'AUC Score': roc_auc_score(y_test, y_proba),
+            'Precision': precision_score(y_test, y_pred),
+            'Recall': recall_score(y_test, y_pred),
+            'F1 Score': f1_score(y_test, y_pred),
+            'MCC': matthews_corrcoef(y_test, y_pred)
+        })
     
-    # Load scaler
-    scaler = None
-    scaler_path = os.path.join('model', 'feature_scaler.pkl')
-    if os.path.exists(scaler_path):
+    return models, scaler, pd.DataFrame(results)
+
+if mode == "🔮 Make Predictions":
+    st.header("🔮 Upload Data & Get Predictions")
+    
+    st.info("📋 Upload your wine dataset (CSV) with quality labels to train models and make predictions")
+    
+    uploaded_file = st.file_uploader("Choose CSV file", type=['csv'])
+    
+    if uploaded_file:
         try:
-            scaler = joblib.load(scaler_path)
-        except:
-            pass
-    
-    if scaler is None:
-        scaler = StandardScaler()
-    
-    # Load results
-    results = None
-    results_path = os.path.join('model', 'model_results.csv')
-    if os.path.exists(results_path):
-        try:
-            results = pd.read_csv(results_path)
-        except:
-            pass
-    
-    # Feature names
-    features = [
-        'fixed_acidity', 'volatile_acidity', 'citric_acid', 'residual_sugar',
-        'chlorides', 'free_sulfur_dioxide', 'total_sulfur_dioxide',
-        'density', 'pH', 'sulphates', 'alcohol'
-    ]
-    
-    return models, scaler, results, features
-
-# Load everything
-models, scaler, results_df, features = load_models()
-
-st.sidebar.success(f"✅ {len(models)} models loaded")
-
-# MODE 1: Performance
-if app_mode == "📊 Model Performance":
-    st.header("📊 Model Performance Dashboard")
-    
-    if results_df is not None:
-        st.dataframe(results_df, use_container_width=True)
-        
-        best_idx = results_df['F1 Score'].idxmax()
-        best_model = results_df.loc[best_idx, 'Model']
-        best_f1 = results_df.loc[best_idx, 'F1 Score']
-        
-        st.success(f"🏆 Best Model: {best_model} (F1: {best_f1:.4f})")
-        
-        # Visualization
-        fig, ax = plt.subplots(figsize=(10, 6))
-        ax.bar(results_df['Model'], results_df['Accuracy'])
-        ax.set_xlabel('Model')
-        ax.set_ylabel('Accuracy')
-        ax.set_title('Model Comparison')
-        plt.xticks(rotation=45, ha='right')
-        st.pyplot(fig)
-    else:
-        st.warning("Model results not found")
-
-# MODE 2: Predictions
-elif app_mode == "🔮 Make Predictions":
-    st.header("🔮 Make Predictions")
-    
-    selected_model = st.selectbox("Choose Model:", list(models.keys()))
-    
-    st.markdown("---")
-    
-    input_method = st.radio("Input Method:", ["📝 Manual Input", "📁 Upload CSV"])
-    
-    if input_method == "📝 Manual Input":
-        st.subheader("Enter Wine Properties")
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            fixed_acidity = st.number_input("Fixed Acidity", 4.0, 16.0, 10.0, 0.1)
-            volatile_acidity = st.number_input("Volatile Acidity", 0.1, 1.6, 0.5, 0.01)
-            citric_acid = st.number_input("Citric Acid", 0.0, 1.0, 0.3, 0.01)
-            residual_sugar = st.number_input("Residual Sugar", 0.9, 16.0, 6.0, 0.1)
-        
-        with col2:
-            chlorides = st.number_input("Chlorides", 0.01, 0.62, 0.08, 0.001)
-            free_sulfur = st.number_input("Free SO₂", 1.0, 72.0, 30.0, 1.0)
-            total_sulfur = st.number_input("Total SO₂", 6.0, 289.0, 100.0, 1.0)
-            density = st.number_input("Density", 0.990, 1.010, 0.997, 0.0001)
-        
-        with col3:
-            ph = st.number_input("pH", 2.7, 4.0, 3.3, 0.01)
-            sulphates = st.number_input("Sulphates", 0.3, 2.0, 0.6, 0.01)
-            alcohol = st.number_input("Alcohol %", 8.0, 15.0, 10.5, 0.1)
-        
-        if st.button("🔍 Predict", type="primary"):
-            input_data = np.array([[
-                fixed_acidity, volatile_acidity, citric_acid, residual_sugar,
-                chlorides, free_sulfur, total_sulfur, density, ph, sulphates, alcohol
-            ]])
+            data = pd.read_csv(uploaded_file)
+            st.success(f"✅ Loaded {data.shape[0]} samples")
             
-            try:
-                input_scaled = scaler.transform(input_data)
-            except:
-                # Fit scaler if needed
-                scaler.fit(input_data)
-                input_scaled = input_data
+            with st.expander("👀 Preview Data"):
+                st.dataframe(data.head(10))
             
-            model = models[selected_model]
-            prediction = model.predict(input_scaled)[0]
-            proba = model.predict_proba(input_scaled)[0]
-            
-            st.markdown("---")
-            st.subheader("Results")
-            
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Model", selected_model)
-            with col2:
-                quality = "Good Quality" if prediction == 1 else "Bad Quality"
-                st.metric("Prediction", quality)
-            with col3:
-                conf = proba[1] if prediction == 1 else proba[0]
-                st.metric("Confidence", f"{conf*100:.1f}%")
-    
-    else:  # CSV Upload
-        st.subheader("Upload Dataset")
-        st.info("Required: 11 wine features (with or without quality column)")
-        
-        uploaded_file = st.file_uploader("Choose CSV", type=['csv'])
-        
-        if uploaded_file:
-            try:
-                data = pd.read_csv(uploaded_file)
-                st.success(f"✅ Loaded: {data.shape[0]} samples")
-                st.dataframe(data.head())
-                
-                has_quality = 'quality' in data.columns or 'quality_binary' in data.columns
-                
-                if st.button("🚀 Run Predictions", type="primary"):
-                    with st.spinner("Processing..."):
-                        # Prepare features
+            if st.button("🚀 Train Models & Predict", type="primary"):
+                with st.spinner("Training models on your data..."):
+                    
+                    # Train models
+                    models, scaler, results_df = train_models_on_data(data)
+                    
+                    if models is None:
+                        st.error("❌ No quality column found. Please include 'quality' column.")
+                    else:
+                        st.success("✅ Models trained successfully!")
+                        
+                        # Select best model
+                        best_idx = results_df['F1 Score'].idxmax()
+                        best_model_name = results_df.loc[best_idx, 'Model']
+                        best_model = models[best_model_name]
+                        
+                        st.markdown("---")
+                        st.subheader("🏆 Best Model Selected")
+                        st.info(f"**{best_model_name}** - F1 Score: {results_df.loc[best_idx, 'F1 Score']:.4f}")
+                        
+                        # Make predictions
                         if 'quality_binary' in data.columns:
                             y_true = data['quality_binary']
-                            X = data[features]
-                        elif 'quality' in data.columns:
-                            y_true = (data['quality'] >= 6).astype(int)
-                            X = data[features]
+                            X = data[FEATURES]
                         else:
-                            y_true = None
-                            X = data[features]
+                            y_true = (data['quality'] >= 6).astype(int)
+                            X = data[FEATURES]
                         
-                        # Scale
-                        try:
-                            X_scaled = scaler.transform(X)
-                        except:
-                            scaler.fit(X)
-                            X_scaled = X
-                        
-                        # Predict
-                        model = models[selected_model]
-                        y_pred = model.predict(X_scaled)
-                        y_proba = model.predict_proba(X_scaled)
+                        X_scaled = scaler.transform(X)
+                        y_pred = best_model.predict(X_scaled)
+                        y_proba = best_model.predict_proba(X_scaled)
                         
                         # Results
-                        st.markdown("---")
-                        st.subheader("📊 Results")
-                        
                         results = data.copy()
-                        results['Predicted'] = ['Good' if p == 1 else 'Bad' for p in y_pred]
+                        results['Predicted_Quality'] = ['Good' if p == 1 else 'Bad' for p in y_pred]
                         results['Confidence'] = [max(p) for p in y_proba]
+                        results['Actual_Quality'] = ['Good' if a == 1 else 'Bad' for a in y_true]
+                        results['Correct'] = ['✓' if p == a else '✗' for p, a in zip(y_pred, y_true)]
                         
-                        if has_quality:
-                            results['Actual'] = ['Good' if a == 1 else 'Bad' for a in y_true]
-                            results['Correct'] = ['✓' if p == a else '✗' for p, a in zip(y_pred, y_true)]
-                        
+                        st.markdown("---")
+                        st.subheader("📊 Prediction Results")
                         st.dataframe(results)
                         
                         # Metrics
-                        col1, col2, col3 = st.columns(3)
+                        col1, col2, col3, col4 = st.columns(4)
                         with col1:
+                            acc = accuracy_score(y_true, y_pred)
+                            st.metric("Accuracy", f"{acc:.2%}")
+                        with col2:
                             good = (y_pred == 1).sum()
                             st.metric("Predicted Good", f"{good} ({good/len(y_pred)*100:.1f}%)")
-                        with col2:
+                        with col3:
                             bad = (y_pred == 0).sum()
                             st.metric("Predicted Bad", f"{bad} ({bad/len(y_pred)*100:.1f}%)")
-                        with col3:
+                        with col4:
                             avg_conf = results['Confidence'].mean()
                             st.metric("Avg Confidence", f"{avg_conf*100:.1f}%")
                         
-                        # If has labels
-                        if has_quality:
-                            st.markdown("---")
-                            acc = accuracy_score(y_true, y_pred)
-                            st.metric("Accuracy", f"{acc:.4f}")
-                            
-                            # Confusion matrix
+                        # Confusion Matrix
+                        st.markdown("---")
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            st.subheader("🎯 Confusion Matrix")
                             cm = confusion_matrix(y_true, y_pred)
                             fig, ax = plt.subplots(figsize=(6, 5))
                             sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
@@ -255,18 +166,107 @@ elif app_mode == "🔮 Make Predictions":
                             ax.set_ylabel('Actual')
                             st.pyplot(fig)
                         
+                        with col2:
+                            st.subheader("📈 Model Comparison")
+                            st.dataframe(results_df.style.format({
+                                'Accuracy': '{:.4f}',
+                                'AUC Score': '{:.4f}',
+                                'Precision': '{:.4f}',
+                                'Recall': '{:.4f}',
+                                'F1 Score': '{:.4f}',
+                                'MCC': '{:.4f}'
+                            }))
+                        
                         # Download
+                        st.markdown("---")
                         csv = results.to_csv(index=False)
                         st.download_button(
-                            "📥 Download Results",
+                            "📥 Download Predictions",
                             csv,
-                            "predictions.csv",
+                            "wine_predictions.csv",
                             "text/csv"
                         )
-                
-            except Exception as e:
-                st.error(f"Error: {str(e)}")
+        
+        except Exception as e:
+            st.error(f"❌ Error: {str(e)}")
+            st.info("Make sure your CSV has the 11 required features and a 'quality' column")
 
-# Footer
+else:  # Train & Compare Models
+    st.header("📊 Train Models & Compare Performance")
+    
+    st.info("Upload your wine dataset to train all 6 models and compare their performance")
+    
+    uploaded_file = st.file_uploader("Choose training dataset (CSV)", type=['csv'])
+    
+    if uploaded_file:
+        try:
+            data = pd.read_csv(uploaded_file)
+            st.success(f"✅ Loaded {data.shape[0]} samples for training")
+            
+            if st.button("🎯 Train All Models", type="primary"):
+                with st.spinner("Training 6 models... This may take a moment..."):
+                    
+                    models, scaler, results_df = train_models_on_data(data)
+                    
+                    if models is None:
+                        st.error("❌ No quality column found")
+                    else:
+                        st.success("✅ All models trained!")
+                        
+                        st.markdown("---")
+                        st.subheader("📊 Model Performance Comparison")
+                        
+                        # Styled dataframe
+                        st.dataframe(
+                            results_df.style.highlight_max(
+                                axis=0,
+                                subset=['Accuracy', 'AUC Score', 'Precision', 'Recall', 'F1 Score', 'MCC'],
+                                color='lightgreen'
+                            ).format({
+                                'Accuracy': '{:.4f}',
+                                'AUC Score': '{:.4f}',
+                                'Precision': '{:.4f}',
+                                'Recall': '{:.4f}',
+                                'F1 Score': '{:.4f}',
+                                'MCC': '{:.4f}'
+                            }),
+                            use_container_width=True
+                        )
+                        
+                        # Best model
+                        best_idx = results_df['F1 Score'].idxmax()
+                        best_model = results_df.loc[best_idx, 'Model']
+                        best_f1 = results_df.loc[best_idx, 'F1 Score']
+                        
+                        st.success(f"🏆 **Best Model:** {best_model} (F1 Score: {best_f1:.4f})")
+                        
+                        # Visualization
+                        st.markdown("---")
+                        st.subheader("📈 Visual Comparison")
+                        
+                        fig, ax = plt.subplots(figsize=(12, 6))
+                        x = range(len(results_df))
+                        width = 0.15
+                        
+                        metrics = ['Accuracy', 'Precision', 'Recall', 'F1 Score']
+                        colors = ['#3498db', '#e74c3c', '#2ecc71', '#f39c12']
+                        
+                        for i, metric in enumerate(metrics):
+                            ax.bar([p + width*i for p in x], results_df[metric],
+                                   width, label=metric, color=colors[i], alpha=0.8)
+                        
+                        ax.set_xlabel('Models', fontweight='bold')
+                        ax.set_ylabel('Score', fontweight='bold')
+                        ax.set_title('Model Performance Comparison', fontweight='bold', fontsize=14)
+                        ax.set_xticks([p + width*1.5 for p in x])
+                        ax.set_xticklabels(results_df['Model'], rotation=45, ha='right')
+                        ax.legend()
+                        ax.grid(axis='y', alpha=0.3)
+                        
+                        st.pyplot(fig)
+        
+        except Exception as e:
+            st.error(f"❌ Error: {str(e)}")
+
 st.markdown("---")
-st.markdown("*Wine Quality Classification | M.Tech Data Science*")
+st.markdown("*Wine Quality Classification | M.Tech Data Science Assignment*")
